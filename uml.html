@@ -23,8 +23,8 @@
     <div class="mermaid">
         classDiagram
             class KoneksiDatabase {
-                - conn
-                - cursor
+                + conn
+                + cursor
                 + eksekusi_query()
                 + ambil_data()
             }
@@ -34,7 +34,7 @@
             }
 
             class ManajemenProduk {
-                - koneksi
+                + koneksi
                 + tambah_produk()
                 + perbarui_produk()
                 + hapus_produk()
@@ -42,17 +42,17 @@
             }
 
             class ManajemenPesanan {
-                - koneksi
+                + koneksi
                 + tambah_pesanan()
                 + hapus_pesanan()
                 + ambil_daftar_pesanan()
             }
 
             class AplikasiEcommerce {
-                - koneksi
-                - manajemen_produk
-                - manajemen_pesanan
-                - popup_informasi
+                + koneksi
+                + manajemen_produk
+                + manajemen_pesanan
+                + popup_informasi
                 + build()
                 + update_product_spinner()
                 + tambah_produk()
