@@ -10,30 +10,147 @@ from kivy.app import App
 import psycopg2
 import pandas as pd
 
-conn = psycopg2.connect(
-    dbname="ecommerce",
-    user="postgres",
-    password="admin",
-    host="localhost",
-    port="5433"
-)
-cursor = conn.cursor()
+class KoneksiDatabase:
+    def __init__(self):
+        self.conn = psycopg2.connect(
+            dbname="ecommerce",
+            user="postgres",
+            password="admin",
+            host="localhost",
+            port="5433"
+        )
+        self.cursor = self.conn.cursor()
 
-class NumericInput(TextInput):
+    def eksekusi_query(self, query, params=None):
+        self.cursor.execute(query, params or ())
+        self.conn.commit()
+
+    def ambil_data(self, query, params=None):
+        self.cursor.execute(query, params or ())
+        return self.cursor.fetchall()
+
+class InputAngka(TextInput):
     def insert_text(self, substring, from_undo=False):
         if substring.isdigit() or substring == '.':
             return super().insert_text(substring, from_undo=from_undo)
         return ''
 
-class EcommerceApp(App):
+class PopupInformasi:
+    def tampilkan_popup(self, judul, pesan):
+        popup_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        popup_layout.add_widget(Label(text=pesan, size_hint_y=None, height=40))
+        close_btn = Button(text='Tutup', size_hint_y=None, height=40, background_color=(0.8, 0.2, 0.2, 1))
+        popup_layout.add_widget(close_btn)
+        popup = Popup(title=judul, content=popup_layout, size_hint=(0.8, 0.4))
+        close_btn.bind(on_press=popup.dismiss)
+        popup.open()
+
+class ManajemenProduk(PopupInformasi):
+    def __init__(self, koneksi):
+        self.koneksi = koneksi
+
+    def tambah_produk(self, nama, deskripsi, harga, stok):
+        if not harga.replace('.', '', 1).isdigit() or not stok.isdigit():
+            self.tampilkan_popup('Error', 'Harga dan Stok harus berupa angka.')
+            return False
+
+        harga = float(harga)
+        stok = int(stok)
+
+        self.koneksi.eksekusi_query(
+            "INSERT INTO products (name, description, price, stock) VALUES (%s, %s, %s, %s)",
+            (nama, deskripsi, harga, stok)
+        )
+        self.tampilkan_popup('Produk Ditambahkan', f'Produk {nama} berhasil ditambahkan.')
+        return True
+
+    def perbarui_produk(self, product_id, nama, deskripsi, harga, stok):
+        if not harga.replace('.', '', 1).isdigit() or not stok.isdigit():
+            self.tampilkan_popup('Error', 'Harga dan Stok harus berupa angka.')
+            return False
+
+        harga = float(harga)
+        stok = int(stok)
+
+        self.koneksi.eksekusi_query(
+            "UPDATE products SET name = %s, description = %s, price = %s, stock = %s WHERE product_id = %s",
+            (nama, deskripsi, harga, stok, product_id)
+        )
+        self.tampilkan_popup('Produk Diperbarui', 'Produk berhasil diperbarui.')
+        return True
+
+    def hapus_produk(self, product_id):
+        self.koneksi.eksekusi_query("DELETE FROM order_items WHERE product_id = %s", (product_id,))
+        self.koneksi.eksekusi_query("DELETE FROM products WHERE product_id = %s", (product_id,))
+        self.tampilkan_popup('Produk Dihapus', 'Produk berhasil dihapus.')
+
+    def ambil_daftar_produk(self):
+        return self.koneksi.ambil_data("SELECT * FROM products")
+
+class ManajemenPesanan(PopupInformasi):
+    def __init__(self, koneksi):
+        self.koneksi = koneksi
+
+    def tambah_pesanan(self, nama_pelanggan, email_pelanggan, produk_terpilih, jumlah):
+        if not jumlah.isdigit():
+            self.tampilkan_popup('Error', 'Jumlah harus berupa angka.')
+            return False
+
+        jumlah = int(jumlah)
+
+        produk = self.koneksi.ambil_data("SELECT product_id, price, stock FROM products WHERE name = %s", (produk_terpilih,))
+        if not produk:
+            self.tampilkan_popup('Error', 'Produk tidak ditemukan.')
+            return False
+
+        product_id, harga_per_unit, stok = produk[0]
+
+        if stok < jumlah:
+            self.tampilkan_popup('Error', 'Stok tidak mencukupi.')
+            return False
+
+        total_harga = jumlah * harga_per_unit
+
+        order_id = self.koneksi.ambil_data(
+            "INSERT INTO orders (customer_name, customer_email, total_amount) VALUES (%s, %s, %s) RETURNING order_id",
+            (nama_pelanggan, email_pelanggan, total_harga)
+        )[0][0]
+
+        self.koneksi.eksekusi_query(
+            "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit) VALUES (%s, %s, %s, %s)",
+            (order_id, product_id, jumlah, harga_per_unit)
+        )
+
+        stok_baru = stok - jumlah
+        self.koneksi.eksekusi_query("UPDATE products SET stock = %s WHERE product_id = %s", (stok_baru, product_id))
+
+        self.tampilkan_popup('Pesanan Ditambahkan', f'Pesanan untuk {nama_pelanggan} berhasil ditambahkan.')
+        return True
+
+    def hapus_pesanan(self, order_id):
+        self.koneksi.eksekusi_query("DELETE FROM order_items WHERE order_id = %s", (order_id,))
+        self.koneksi.eksekusi_query("DELETE FROM orders WHERE order_id = %s", (order_id,))
+        self.tampilkan_popup('Pesanan Dihapus', 'Pesanan berhasil dihapus.')
+
+    def ambil_daftar_pesanan(self):
+        return self.koneksi.ambil_data("SELECT * FROM orders")
+
+class AplikasiEcommerce(App):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.koneksi = KoneksiDatabase()
+        self.manajemen_produk = ManajemenProduk(self.koneksi)
+        self.manajemen_pesanan = ManajemenPesanan(self.koneksi)
+        self.popup_informasi = PopupInformasi()
+
     def build(self):
         self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
         self.layout.add_widget(Label(text='Manajemen Produk', size_hint_y=None, height=40, font_size=20, bold=True))
         self.product_name = TextInput(hint_text='Nama Produk', size_hint_y=None, height=40)
         self.product_description = TextInput(hint_text='Deskripsi', size_hint_y=None, height=40)
-        self.product_price = NumericInput(hint_text='Harga', size_hint_y=None, height=40)
-        self.product_stock = NumericInput(hint_text='Stok', size_hint_y=None, height=40)
+        self.product_price = InputAngka(hint_text='Harga', size_hint_y=None, height=40)
+        self.product_stock = InputAngka(hint_text='Stok', size_hint_y=None, height=40)
         self.layout.add_widget(self.product_name)
         self.layout.add_widget(self.product_description)
         self.layout.add_widget(self.product_price)
@@ -53,7 +170,7 @@ class EcommerceApp(App):
         self.update_product_spinner()
         self.layout.add_widget(self.product_spinner)
 
-        self.quantity = NumericInput(hint_text='Jumlah', size_hint_y=None, height=40)
+        self.quantity = InputAngka(hint_text='Jumlah', size_hint_y=None, height=40)
         self.layout.add_widget(self.quantity)
 
         self.add_order_btn = Button(text='Tambah Pesanan', size_hint_y=None, height=40, background_color=(0, 0.7, 0, 1))
@@ -75,9 +192,8 @@ class EcommerceApp(App):
         return self.layout
 
     def update_product_spinner(self):
-        cursor.execute("SELECT name FROM products")
-        products = cursor.fetchall()
-        self.product_spinner.values = [product[0] for product in products]
+        produk = self.manajemen_produk.ambil_daftar_produk()
+        self.product_spinner.values = [p[1] for p in produk]
 
     def tambah_produk(self, instance):
         nama = self.product_name.text
@@ -85,18 +201,8 @@ class EcommerceApp(App):
         harga = self.product_price.text
         stok = self.product_stock.text
 
-        if not harga.replace('.', '', 1).isdigit() or not stok.isdigit():
-            self.tampilkan_popup('Error', 'Harga dan Stok harus berupa angka.')
-            return
-
-        harga = float(harga)
-        stok = int(stok)
-
-        cursor.execute("INSERT INTO products (name, description, price, stock) VALUES (%s, %s, %s, %s)",
-                       (nama, deskripsi, harga, stok))
-        conn.commit()
-        self.update_product_spinner()
-        self.tampilkan_popup('Produk Ditambahkan', f'Produk {nama} berhasil ditambahkan.')
+        if self.manajemen_produk.tambah_produk(nama, deskripsi, harga, stok):
+            self.update_product_spinner()
 
     def tambah_pesanan(self, instance):
         nama_pelanggan = self.customer_name.text
@@ -104,77 +210,36 @@ class EcommerceApp(App):
         produk_terpilih = self.product_spinner.text
         jumlah = self.quantity.text
 
-        if not jumlah.isdigit():
-            self.tampilkan_popup('Error', 'Jumlah harus berupa angka.')
-            return
-
-        jumlah = int(jumlah)
-
-        cursor.execute("SELECT product_id, price, stock FROM products WHERE name = %s", (produk_terpilih,))
-        produk = cursor.fetchone()
-        if produk is None:
-            self.tampilkan_popup('Error', 'Produk tidak ditemukan.')
-            return
-
-        product_id, harga_per_unit, stok = produk
-
-        if stok < jumlah:
-            self.tampilkan_popup('Error', 'Stok tidak mencukupi.')
-            return
-
-        total_harga = jumlah * harga_per_unit
-
-        cursor.execute("INSERT INTO orders (customer_name, customer_email, total_amount) VALUES (%s, %s, %s) RETURNING order_id",
-                    (nama_pelanggan, email_pelanggan, total_harga))
-        order_id = cursor.fetchone()[0]
-
-        cursor.execute("INSERT INTO order_items (order_id, product_id, quantity, price_per_unit) VALUES (%s, %s, %s, %s)",
-                    (order_id, product_id, jumlah, harga_per_unit))
-
-        stok_baru = stok - jumlah
-        cursor.execute("UPDATE products SET stock = %s WHERE product_id = %s", (stok_baru, product_id))
-
-        conn.commit()
-        self.tampilkan_popup('Pesanan Ditambahkan', f'Pesanan untuk {nama_pelanggan} berhasil ditambahkan.')
-        self.update_product_spinner()
+        if self.manajemen_pesanan.tambah_pesanan(nama_pelanggan, email_pelanggan, produk_terpilih, jumlah):
+            self.update_product_spinner()
 
     def ekspor_ke_excel(self, instance):
         try:
-            products_df = pd.read_sql_query("SELECT * FROM products", conn)
-            products_df.to_excel('produk.xlsx', index=False, sheet_name='Produk')
+            produk_df = pd.DataFrame(self.manajemen_produk.ambil_daftar_produk(), columns=['product_id', 'name', 'description', 'price', 'stock'])
+            produk_df.to_excel('produk.xlsx', index=False, sheet_name='Produk')
 
-            orders_df = pd.read_sql_query("SELECT * FROM orders", conn)
-            order_items_df = pd.read_sql_query("SELECT * FROM order_items", conn)
-            
-            order_details_df = pd.merge(order_items_df, products_df, on='product_id', how='left')
-            order_details_df = pd.merge(order_details_df, orders_df, on='order_id', how='left')
-            
-            order_list_df = order_details_df[['order_id', 'customer_name', 'customer_email', 'name', 'quantity', 'price_per_unit', 'total_amount', 'order_date']]
+            pesanan_df = pd.DataFrame(self.manajemen_pesanan.ambil_daftar_pesanan(), columns=['order_id', 'customer_name', 'customer_email', 'total_amount', 'order_date'])
+            order_items_df = pd.DataFrame(self.koneksi.ambil_data("SELECT * FROM order_items"), columns=['order_item_id', 'order_id', 'product_id', 'quantity', 'price_per_unit'])
+
+            order_details_df = pd.merge(order_items_df, produk_df, on='product_id', how='left')
+            order_details_df = pd.merge(order_details_df, pesanan_df, on='order_id', how='left')
+
+            order_list_df = order_details_df[['order_id', 'customer_name', 'customer_email', 'name', 'quantity', 'price_per_unit', 'total_amount', 'order_date']].copy()
             order_list_df.rename(columns={
                 'name': 'product_name',
                 'quantity': 'product_quantity',
                 'price_per_unit': 'product_price_per_unit'
             }, inplace=True)
-            
+
             order_list_df.to_excel('daftar_pesanan.xlsx', index=False, sheet_name='Daftar Pesanan')
 
-            self.tampilkan_popup('Ekspor Berhasil', 'Data berhasil diekspor ke dua file Excel: produk.xlsx dan daftar_pesanan.xlsx.')
-        
+            self.popup_informasi.tampilkan_popup('Ekspor Berhasil', 'Data berhasil diekspor ke dua file Excel: produk.xlsx dan daftar_pesanan.xlsx.')
+
         except Exception as e:
-            self.tampilkan_popup('Error', f'Terjadi kesalahan saat mengekspor data: {str(e)}')
+            self.popup_informasi.tampilkan_popup('Error', f'Terjadi kesalahan saat mengekspor data: {str(e)}')
 
-    def tampilkan_popup(self, judul, pesan):
-        popup_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        popup_layout.add_widget(Label(text=pesan, size_hint_y=None, height=40))
-        close_btn = Button(text='Tutup', size_hint_y=None, height=40, background_color=(0.8, 0.2, 0.2, 1))
-        popup_layout.add_widget(close_btn)
-        popup = Popup(title=judul, content=popup_layout, size_hint=(0.8, 0.4))
-        close_btn.bind(on_press=popup.dismiss)
-        popup.open()
-
-    def tampilkan_popup_produk(self, instance):        
-        cursor.execute("SELECT * FROM products")
-        produk = cursor.fetchall()
+    def tampilkan_popup_produk(self, instance):
+        produk = self.manajemen_produk.ambil_daftar_produk()
 
         scroll_layout = GridLayout(cols=5, spacing=10, size_hint_y=None, padding=10)
         scroll_layout.bind(minimum_height=scroll_layout.setter('height'))
@@ -213,8 +278,7 @@ class EcommerceApp(App):
         popup.open()
 
     def tampilkan_popup_pesanan(self, instance):
-        cursor.execute("SELECT * FROM orders")
-        pesanan = cursor.fetchall()
+        pesanan = self.manajemen_pesanan.ambil_daftar_pesanan()
 
         scroll_layout = GridLayout(cols=1, spacing=10, size_hint_y=None)
         scroll_layout.bind(minimum_height=scroll_layout.setter('height'))
@@ -256,8 +320,8 @@ class EcommerceApp(App):
 
         new_name = TextInput(text=produk[1], hint_text='Nama Baru', size_hint_y=None, height=40)
         new_description = TextInput(text=produk[2], hint_text='Deskripsi Baru', size_hint_y=None, height=40)
-        new_price = NumericInput(text=str(produk[3]), hint_text='Harga Baru', size_hint_y=None, height=40)
-        new_stock = NumericInput(text=str(produk[4]), hint_text='Stok Baru', size_hint_y=None, height=40)
+        new_price = InputAngka(text=str(produk[3]), hint_text='Harga Baru', size_hint_y=None, height=40)
+        new_stock = InputAngka(text=str(produk[4]), hint_text='Stok Baru', size_hint_y=None, height=40)
 
         update_popup_layout.add_widget(new_name)
         update_popup_layout.add_widget(new_description)
@@ -272,31 +336,15 @@ class EcommerceApp(App):
         update_popup.open()
 
     def simpan_perbaruan_produk(self, product_id, new_name, new_description, new_price, new_stock):
-        if not new_price.replace('.', '', 1).isdigit() or not new_stock.isdigit():
-            self.tampilkan_popup('Error', 'Harga dan Stok harus berupa angka.')
-            return
-
-        new_price = float(new_price)
-        new_stock = int(new_stock)
-
-        cursor.execute("UPDATE products SET name = %s, description = %s, price = %s, stock = %s WHERE product_id = %s",
-                       (new_name, new_description, new_price, new_stock, product_id))
-        conn.commit()
-        self.tampilkan_popup('Produk Diperbarui', 'Produk berhasil diperbarui.')
-        self.update_product_spinner()
+        if self.manajemen_produk.perbarui_produk(product_id, new_name, new_description, new_price, new_stock):
+            self.update_product_spinner()
 
     def hapus_produk(self, produk):
-        cursor.execute("DELETE FROM order_items WHERE product_id = %s", (produk[0],))
-        cursor.execute("DELETE FROM products WHERE product_id = %s", (produk[0],))
-        conn.commit()
-        self.tampilkan_popup('Produk Dihapus', 'Produk berhasil dihapus.')
+        self.manajemen_produk.hapus_produk(produk[0])
         self.update_product_spinner()
 
     def hapus_pesanan(self, pesanan):
-        cursor.execute("DELETE FROM order_items WHERE order_id = %s", (pesanan[0],))
-        cursor.execute("DELETE FROM orders WHERE order_id = %s", (pesanan[0],))
-        conn.commit()
-        self.tampilkan_popup('Pesanan Dihapus', 'Pesanan berhasil dihapus.')
+        self.manajemen_pesanan.hapus_pesanan(pesanan[0])
 
 if __name__ == '__main__':
-    EcommerceApp().run()
+    AplikasiEcommerce().run()
