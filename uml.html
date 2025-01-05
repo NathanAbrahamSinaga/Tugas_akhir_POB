@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Class Diagram - Sistem Ecommerce</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .mermaid {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Diagram UML - Sistem Ecommerce</h1>
+    <div class="mermaid">
+        classDiagram
+            class KoneksiDatabase {
+                - conn
+                - cursor
+                + eksekusi_query()
+                + ambil_data()
+            }
+
+            class PopupInformasi {
+                + tampilkan_popup()
+            }
+
+            class ManajemenProduk {
+                - koneksi
+                + tambah_produk()
+                + perbarui_produk()
+                + hapus_produk()
+                + ambil_daftar_produk()
+            }
+
+            class ManajemenPesanan {
+                - koneksi
+                + tambah_pesanan()
+                + hapus_pesanan()
+                + ambil_daftar_pesanan()
+            }
+
+            class AplikasiEcommerce {
+                - koneksi
+                - manajemen_produk
+                - manajemen_pesanan
+                - popup_informasi
+                + build()
+                + update_product_spinner()
+                + tambah_produk()
+                + tambah_pesanan()
+                + ekspor_ke_excel()
+                + tampilkan_popup_produk()
+                + tampilkan_popup_pesanan()
+                + perbarui_produk()
+                + simpan_perbaruan_produk()
+                + hapus_produk()
+                + hapus_pesanan()
+            }
+
+            class InputAngka {
+                + insert_text()
+            }
+
+            KoneksiDatabase <.. AplikasiEcommerce : menggunakan koneksi database
+            PopupInformasi <.. ManajemenProduk : menampilkan popup
+            PopupInformasi <.. ManajemenPesanan : menampilkan popup
+            ManajemenProduk <.. AplikasiEcommerce : mengelola produk
+            ManajemenPesanan <.. AplikasiEcommerce : mengelola pesanan
+            InputAngka <.. AplikasiEcommerce : memvalidasi input angka
+    </div>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</body>
+</html>
